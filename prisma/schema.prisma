@@ -1,0 +1,134 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// --- Enums ---
+
+enum WashStatus {
+  washed
+  not_washed
+}
+
+enum IdentityProvider {
+  wechat_mini
+  wechat_app
+  device
+  phone
+}
+
+enum UserStatus {
+  active
+  merged
+  disabled
+}
+
+// --- Models ---
+
+model User {
+  id             String     @id @default(uuid()) @db.Uuid
+  nickname       String     @db.VarChar(64)
+  avatarUrl      String     @default("") @db.Text
+  gender         Int        @default(0)
+  hairLength     String     @default("") @db.VarChar(16)
+  hairType       String     @default("") @db.VarChar(16)
+  region         String     @default("") @db.VarChar(128)
+  timezone       String     @default("Asia/Shanghai") @db.VarChar(64)
+  status         UserStatus @default(active)
+  mergedToUserId String?    @db.Uuid
+  lastActiveAt   DateTime   @default(now()) @db.Timestamptz
+  createdAt      DateTime   @default(now()) @db.Timestamptz
+  updatedAt      DateTime   @updatedAt @db.Timestamptz
+
+  identities  UserIdentity[]
+  washRecords WashRecord[]
+  statistics  UserStatistics?
+  adviceLogs  AdviceLog[]
+  syncBatches SyncBatch[]
+
+  @@index([lastActiveAt])
+  @@index([status])
+}
+
+model UserIdentity {
+  id                  String           @id @default(uuid()) @db.Uuid
+  userId              String           @db.Uuid
+  provider            IdentityProvider
+  providerUserId      String           @db.VarChar(128)
+  unionId             String?          @db.VarChar(128)
+  sessionKeyEncrypted String?          @db.Text
+  createdAt           DateTime         @default(now()) @db.Timestamptz
+  updatedAt           DateTime         @updatedAt @db.Timestamptz
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@unique([provider, providerUserId])
+  @@index([userId])
+  @@index([unionId])
+}
+
+model WashRecord {
+  id              String      @id @default(uuid()) @db.Uuid
+  userId          String      @db.Uuid
+  recordDate      DateTime    @db.Date
+  status          WashStatus
+  source          String      @default("app") @db.VarChar(32)
+  note            String      @default("") @db.VarChar(255)
+  clientUpdatedAt DateTime?   @db.Timestamptz
+  deletedAt       DateTime?   @db.Timestamptz
+  createdAt       DateTime    @default(now()) @db.Timestamptz
+  updatedAt       DateTime    @updatedAt @db.Timestamptz
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@unique([userId, recordDate])
+  @@index([userId, recordDate(sort: Desc)])
+  @@index([recordDate])
+}
+
+model UserStatistics {
+  userId        String    @id @db.Uuid
+  totalCheckIn  Int       @default(0)
+  monthWashed   Int       @default(0)
+  maxStreak     Int       @default(0)
+  currentStreak Int       @default(0)
+  lastCalcDate  String    @default("") @db.VarChar(10)
+  calculatedAt  DateTime  @default(now()) @db.Timestamptz
+  createdAt     DateTime  @default(now()) @db.Timestamptz
+  updatedAt     DateTime  @updatedAt @db.Timestamptz
+
+  user User @relation(fields: [userId], references: [id])
+}
+
+model AdviceLog {
+  id             String   @id @default(uuid()) @db.Uuid
+  userId         String   @db.Uuid
+  decision       String   @db.VarChar(16)
+  confidence     Int
+  inputSnapshot  Json
+  outputSnapshot Json
+  provider       String   @default("rule") @db.VarChar(32)
+  createdAt      DateTime @default(now()) @db.Timestamptz
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId, createdAt(sort: Desc)])
+}
+
+model SyncBatch {
+  id             String   @id @default(uuid()) @db.Uuid
+  userId         String   @db.Uuid
+  clientId       String   @db.VarChar(128)
+  idempotencyKey String   @db.VarChar(128)
+  status         String   @db.VarChar(16)
+  recordsCount   Int      @default(0)
+  createdAt      DateTime @default(now()) @db.Timestamptz
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@unique([userId, clientId, idempotencyKey])
+}
