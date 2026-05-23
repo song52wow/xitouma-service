@@ -110,48 +110,7 @@ jobs:
           BACKFILL_WINDOW_DAYS: ${{ vars.BACKFILL_WINDOW_DAYS }}
           CORS_ORIGIN: ${{ vars.CORS_ORIGIN }}
           POSTGRES_HOST: ${{ vars.POSTGRES_HOST }}
-        run: |
-          if [ -n "$ECS_ENV_PRODUCTION" ]; then
-            printf '%s\n' "$ECS_ENV_PRODUCTION" > /tmp/.env.production
-          else
-            postgres_host="${POSTGRES_HOST:-postgres}"
-            database_url=$(node -e "
-              const user = encodeURIComponent(process.env.POSTGRES_USER || '');
-              const password = encodeURIComponent(process.env.POSTGRES_PASSWORD || '');
-              const db = process.env.POSTGRES_DB || '';
-              const host = process.env.POSTGRES_HOST || 'postgres';
-              if (!user || !password || !db) process.exit(1);
-              console.log(\`postgresql://\${user}:\${password}@\${host}:5432/\${db}?schema=public\`);
-            ")
-
-            jwt_access_expires_in="7200"
-            jwt_refresh_expires_in="2592000"
-            wechat_jscode2session_url="${WECHAT_JSCODE2SESSION_URL:-https://api.weixin.qq.com/sns/jscode2session}"
-            weather_api_key="${WEATHER_API_KEY:-}"
-            default_timezone="${DEFAULT_TIMEZONE:-Asia/Shanghai}"
-            backfill_window_days="${BACKFILL_WINDOW_DAYS:-30}"
-
-            cat > /tmp/.env.production <<EOF
-DATABASE_URL="${database_url}"
-JWT_SECRET="${JWT_SECRET}"
-JWT_ACCESS_EXPIRES_IN="${jwt_access_expires_in}"
-JWT_REFRESH_EXPIRES_IN="${jwt_refresh_expires_in}"
-WECHAT_APPID="${WECHAT_APPID}"
-WECHAT_SECRET="${WECHAT_SECRET}"
-WECHAT_JSCODE2SESSION_URL="${wechat_jscode2session_url}"
-WEATHER_API_KEY="${weather_api_key}"
-DEFAULT_TIMEZONE="${default_timezone}"
-BACKFILL_WINDOW_DAYS=${backfill_window_days}
-HOST=0.0.0.0
-PORT=3000
-CORS_ORIGIN="${CORS_ORIGIN}"
-POSTGRES_USER="${POSTGRES_USER}"
-POSTGRES_PASSWORD="${POSTGRES_PASSWORD}"
-POSTGRES_DB="${POSTGRES_DB}"
-EOF
-          fi
-
-          chmod 600 /tmp/.env.production
+        run: node scripts/render-production-env.mjs /tmp/.env.production
 
       - name: Upload release files
         env:
