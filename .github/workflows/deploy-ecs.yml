@@ -14,13 +14,32 @@ concurrency:
 env:
   DEPLOY_PATH: ${{ vars.ECS_DEPLOY_PATH || '/opt/xitouma-backend' }}
   COMPOSE_PROJECT_NAME: ${{ vars.ECS_COMPOSE_PROJECT || 'xitouma-backend' }}
-  ECS_PORT: ${{ secrets.ALIYUN_ECS_PORT || '22' }}
+  ECS_PORT: ${{ secrets.ALIYUN_ECS_PORT || vars.ALIYUN_ECS_PORT || '22' }}
   APP_HOST_PORT: ${{ vars.ECS_APP_PORT || '3001' }}
 
 jobs:
   deploy:
     name: Build and deploy
     runs-on: ubuntu-latest
+
+    env:
+      ECS_ENV_PRODUCTION: ${{ secrets.ECS_ENV_PRODUCTION }}
+      DATABASE_URL: ${{ secrets.DATABASE_URL || vars.DATABASE_URL }}
+      JWT_SECRET: ${{ secrets.JWT_SECRET || vars.JWT_SECRET }}
+      JWT_ACCESS_EXPIRES_IN: ${{ secrets.JWT_ACCESS_EXPIRES_IN || vars.JWT_ACCESS_EXPIRES_IN }}
+      JWT_REFRESH_EXPIRES_IN: ${{ secrets.JWT_REFRESH_EXPIRES_IN || vars.JWT_REFRESH_EXPIRES_IN }}
+      WECHAT_APPID: ${{ secrets.WECHAT_APPID || vars.WECHAT_APPID }}
+      WECHAT_SECRET: ${{ secrets.WECHAT_SECRET || vars.WECHAT_SECRET }}
+      WECHAT_JSCODE2SESSION_URL: ${{ secrets.WECHAT_JSCODE2SESSION_URL || vars.WECHAT_JSCODE2SESSION_URL }}
+      WEATHER_API_KEY: ${{ secrets.WEATHER_API_KEY || vars.WEATHER_API_KEY }}
+      DEFAULT_TIMEZONE: ${{ secrets.DEFAULT_TIMEZONE || vars.DEFAULT_TIMEZONE }}
+      BACKFILL_WINDOW_DAYS: ${{ secrets.BACKFILL_WINDOW_DAYS || vars.BACKFILL_WINDOW_DAYS }}
+      HOST: ${{ secrets.HOST || vars.HOST }}
+      PORT: ${{ secrets.PORT || vars.PORT }}
+      CORS_ORIGIN: ${{ secrets.CORS_ORIGIN || vars.CORS_ORIGIN }}
+      POSTGRES_USER: ${{ secrets.POSTGRES_USER || vars.POSTGRES_USER }}
+      POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD || vars.POSTGRES_PASSWORD }}
+      POSTGRES_DB: ${{ secrets.POSTGRES_DB || vars.POSTGRES_DB }}
 
     steps:
       - name: Check out repository
@@ -41,26 +60,51 @@ jobs:
       - name: Build backend
         run: npm run build
 
-      - name: Validate deployment secrets
+      - name: Validate deployment configuration
+        env:
+          ALIYUN_ECS_HOST: ${{ secrets.ALIYUN_ECS_HOST || vars.ALIYUN_ECS_HOST }}
+          ALIYUN_ECS_USER: ${{ secrets.ALIYUN_ECS_USER || vars.ALIYUN_ECS_USER }}
+          ALIYUN_ECS_SSH_KEY: ${{ secrets.ALIYUN_ECS_SSH_KEY }}
         run: |
-          test -n "${{ secrets.ALIYUN_ECS_HOST }}" || (echo "Missing secret: ALIYUN_ECS_HOST" && exit 1)
-          test -n "${{ secrets.ALIYUN_ECS_USER }}" || (echo "Missing secret: ALIYUN_ECS_USER" && exit 1)
-          test -n "${{ secrets.ALIYUN_ECS_SSH_KEY }}" || (echo "Missing secret: ALIYUN_ECS_SSH_KEY" && exit 1)
-          test -n "${{ secrets.DATABASE_URL }}" || (echo "Missing secret: DATABASE_URL" && exit 1)
-          test -n "${{ secrets.JWT_SECRET }}" || (echo "Missing secret: JWT_SECRET" && exit 1)
-          test -n "${{ secrets.WECHAT_APPID }}" || (echo "Missing secret: WECHAT_APPID" && exit 1)
-          test -n "${{ secrets.WECHAT_SECRET }}" || (echo "Missing secret: WECHAT_SECRET" && exit 1)
-          test -n "${{ secrets.CORS_ORIGIN }}" || (echo "Missing secret: CORS_ORIGIN" && exit 1)
-          test -n "${{ secrets.POSTGRES_USER }}" || (echo "Missing secret: POSTGRES_USER" && exit 1)
-          test -n "${{ secrets.POSTGRES_PASSWORD }}" || (echo "Missing secret: POSTGRES_PASSWORD" && exit 1)
-          test -n "${{ secrets.POSTGRES_DB }}" || (echo "Missing secret: POSTGRES_DB" && exit 1)
+          missing=()
+
+          test -n "$ALIYUN_ECS_HOST" || missing+=("ALIYUN_ECS_HOST")
+          test -n "$ALIYUN_ECS_USER" || missing+=("ALIYUN_ECS_USER")
+          test -n "$ALIYUN_ECS_SSH_KEY" || missing+=("ALIYUN_ECS_SSH_KEY (secret only)")
+
+          if [ -z "$ECS_ENV_PRODUCTION" ]; then
+            test -n "$DATABASE_URL" || missing+=("DATABASE_URL")
+            test -n "$JWT_SECRET" || missing+=("JWT_SECRET")
+            test -n "$WECHAT_APPID" || missing+=("WECHAT_APPID")
+            test -n "$WECHAT_SECRET" || missing+=("WECHAT_SECRET")
+            test -n "$CORS_ORIGIN" || missing+=("CORS_ORIGIN")
+            test -n "$POSTGRES_USER" || missing+=("POSTGRES_USER")
+            test -n "$POSTGRES_PASSWORD" || missing+=("POSTGRES_PASSWORD")
+            test -n "$POSTGRES_DB" || missing+=("POSTGRES_DB")
+          fi
+
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "Missing GitHub Actions secrets or variables:"
+            printf '  - %s\n' "${missing[@]}"
+            echo ""
+            echo "Each key can be stored under Secrets or Variables with the same name."
+            echo "Optional with defaults: WEATHER_API_KEY, DEFAULT_TIMEZONE, BACKFILL_WINDOW_DAYS,"
+            echo "JWT_ACCESS_EXPIRES_IN, JWT_REFRESH_EXPIRES_IN, WECHAT_JSCODE2SESSION_URL, HOST, PORT"
+            echo "Legacy fallback: secret ECS_ENV_PRODUCTION (full .env.production file)"
+            exit 1
+          fi
+
+          if [ -n "$DATABASE_URL" ] && [[ "$DATABASE_URL" != *"@postgres:"* ]]; then
+            echo "Warning: DATABASE_URL should use host 'postgres' on the xitouma-net Docker network."
+            echo "Example: postgresql://user:pass@postgres:5432/xitouma?schema=public"
+          fi
 
       - name: Package source
         run: git archive --format=tar.gz --output=/tmp/xitouma-backend.tar.gz HEAD
 
       - name: Prepare SSH
         env:
-          ALIYUN_ECS_HOST: ${{ secrets.ALIYUN_ECS_HOST }}
+          ALIYUN_ECS_HOST: ${{ secrets.ALIYUN_ECS_HOST || vars.ALIYUN_ECS_HOST }}
           ALIYUN_ECS_SSH_KEY: ${{ secrets.ALIYUN_ECS_SSH_KEY }}
         run: |
           install -m 700 -d ~/.ssh
@@ -69,34 +113,20 @@ jobs:
           ssh-keyscan -p "$ECS_PORT" "$ALIYUN_ECS_HOST" >> ~/.ssh/known_hosts
 
       - name: Write production env
-        env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          JWT_SECRET: ${{ secrets.JWT_SECRET }}
-          JWT_ACCESS_EXPIRES_IN: ${{ secrets.JWT_ACCESS_EXPIRES_IN }}
-          JWT_REFRESH_EXPIRES_IN: ${{ secrets.JWT_REFRESH_EXPIRES_IN }}
-          WECHAT_APPID: ${{ secrets.WECHAT_APPID }}
-          WECHAT_SECRET: ${{ secrets.WECHAT_SECRET }}
-          WECHAT_JSCODE2SESSION_URL: ${{ secrets.WECHAT_JSCODE2SESSION_URL }}
-          WEATHER_API_KEY: ${{ secrets.WEATHER_API_KEY }}
-          DEFAULT_TIMEZONE: ${{ secrets.DEFAULT_TIMEZONE }}
-          BACKFILL_WINDOW_DAYS: ${{ secrets.BACKFILL_WINDOW_DAYS }}
-          HOST: ${{ secrets.HOST }}
-          PORT: ${{ secrets.PORT }}
-          CORS_ORIGIN: ${{ secrets.CORS_ORIGIN }}
-          POSTGRES_USER: ${{ secrets.POSTGRES_USER }}
-          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
-          POSTGRES_DB: ${{ secrets.POSTGRES_DB }}
         run: |
-          jwt_access_expires_in="${JWT_ACCESS_EXPIRES_IN:-7200}"
-          jwt_refresh_expires_in="${JWT_REFRESH_EXPIRES_IN:-2592000}"
-          wechat_jscode2session_url="${WECHAT_JSCODE2SESSION_URL:-https://api.weixin.qq.com/sns/jscode2session}"
-          weather_api_key="${WEATHER_API_KEY:-}"
-          default_timezone="${DEFAULT_TIMEZONE:-Asia/Shanghai}"
-          backfill_window_days="${BACKFILL_WINDOW_DAYS:-30}"
-          host="${HOST:-0.0.0.0}"
-          port="${PORT:-3000}"
+          if [ -n "$ECS_ENV_PRODUCTION" ]; then
+            printf '%s\n' "$ECS_ENV_PRODUCTION" > /tmp/.env.production
+          else
+            jwt_access_expires_in="${JWT_ACCESS_EXPIRES_IN:-7200}"
+            jwt_refresh_expires_in="${JWT_REFRESH_EXPIRES_IN:-2592000}"
+            wechat_jscode2session_url="${WECHAT_JSCODE2SESSION_URL:-https://api.weixin.qq.com/sns/jscode2session}"
+            weather_api_key="${WEATHER_API_KEY:-}"
+            default_timezone="${DEFAULT_TIMEZONE:-Asia/Shanghai}"
+            backfill_window_days="${BACKFILL_WINDOW_DAYS:-30}"
+            host="${HOST:-0.0.0.0}"
+            port="${PORT:-3000}"
 
-          cat > /tmp/.env.production <<EOF
+            cat > /tmp/.env.production <<EOF
 DATABASE_URL="${DATABASE_URL}"
 JWT_SECRET="${JWT_SECRET}"
 JWT_ACCESS_EXPIRES_IN="${jwt_access_expires_in}"
@@ -114,13 +144,14 @@ POSTGRES_USER="${POSTGRES_USER}"
 POSTGRES_PASSWORD="${POSTGRES_PASSWORD}"
 POSTGRES_DB="${POSTGRES_DB}"
 EOF
+          fi
 
           chmod 600 /tmp/.env.production
 
       - name: Upload release files
         env:
-          ALIYUN_ECS_HOST: ${{ secrets.ALIYUN_ECS_HOST }}
-          ALIYUN_ECS_USER: ${{ secrets.ALIYUN_ECS_USER }}
+          ALIYUN_ECS_HOST: ${{ secrets.ALIYUN_ECS_HOST || vars.ALIYUN_ECS_HOST }}
+          ALIYUN_ECS_USER: ${{ secrets.ALIYUN_ECS_USER || vars.ALIYUN_ECS_USER }}
         run: |
           ssh -i ~/.ssh/aliyun_ecs -p "$ECS_PORT" "$ALIYUN_ECS_USER@$ALIYUN_ECS_HOST" \
             "mkdir -p '$DEPLOY_PATH/releases/${GITHUB_SHA}' '$DEPLOY_PATH/shared'"
@@ -131,8 +162,8 @@ EOF
 
       - name: Deploy on ECS
         env:
-          ALIYUN_ECS_HOST: ${{ secrets.ALIYUN_ECS_HOST }}
-          ALIYUN_ECS_USER: ${{ secrets.ALIYUN_ECS_USER }}
+          ALIYUN_ECS_HOST: ${{ secrets.ALIYUN_ECS_HOST || vars.ALIYUN_ECS_HOST }}
+          ALIYUN_ECS_USER: ${{ secrets.ALIYUN_ECS_USER || vars.ALIYUN_ECS_USER }}
         run: |
           ssh -i ~/.ssh/aliyun_ecs -p "$ECS_PORT" "$ALIYUN_ECS_USER@$ALIYUN_ECS_HOST" \
             "DEPLOY_PATH='$DEPLOY_PATH' RELEASE_ID='${GITHUB_SHA}' COMPOSE_PROJECT_NAME='$COMPOSE_PROJECT_NAME' APP_HOST_PORT='$APP_HOST_PORT' bash -s" <<'REMOTE_SCRIPT'

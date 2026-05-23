@@ -23,13 +23,18 @@ backend on GitHub Actions, uploads the current commit to the ECS instance over
 SSH, writes `.env.production` from a GitHub Secret, then runs Docker Compose on
 the server.
 
-Required GitHub Secrets:
+Required GitHub configuration (each key may be a **Secret** or a **Variable** with the same name):
 
 - `ALIYUN_ECS_HOST`: ECS public IP or domain.
 - `ALIYUN_ECS_USER`: SSH user with permission to run Docker Compose.
-- `ALIYUN_ECS_SSH_KEY`: private key for the SSH user.
+- `ALIYUN_ECS_SSH_KEY`: private key for the SSH user (**Secret only**).
 - `DATABASE_URL`, `JWT_SECRET`, `WECHAT_APPID`, `WECHAT_SECRET`, `CORS_ORIGIN`
 - `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`
+
+`DATABASE_URL` must use host `postgres` (Docker network alias), for example:
+`postgresql://xitouma:<password>@postgres:5432/xitouma?schema=public`
+
+Legacy option: set secret `ECS_ENV_PRODUCTION` to the full `.env.production` file instead of split keys.
 
 Optional GitHub Secrets (workflow defaults apply when omitted):
 
