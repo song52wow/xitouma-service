@@ -18,10 +18,19 @@ curl http://127.0.0.1:3001/health
 
 ## GitHub Actions Deploy
 
-The workflow is in `.github/workflows/deploy-ecs.yml`. It builds the NestJS
-backend on GitHub Actions, uploads the current commit to the ECS instance over
-SSH, assembles `.env.production` from GitHub Secrets and Variables, then runs
-Docker Compose on the server.
+The workflow is in `.github/workflows/deploy-ecs.yml`. It builds the Docker image
+on GitHub Actions, pushes it to Aliyun ACR, then SSHs to ECS to pull the image
+and start the container. The ECS host does not build images (Docker Hub is often
+unreachable from mainland China).
+
+### ACR Secrets (required for image build)
+
+| Secret | Description |
+|--------|-------------|
+| `ACR_USERNAME` | Aliyun container registry username (same as tizhongji-service) |
+| `ACR_PASSWORD` | Aliyun container registry password |
+
+Image: `crpi-df6i5zrps8a8t6ig.cn-shenzhen.personal.cr.aliyuncs.com/song52wow/xitouma-service`
 
 ### SSH Secrets (required)
 

@@ -1,12 +1,10 @@
 services:
   app:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: ${XITOUMA_IMAGE}
     env_file:
       - .env.production
     ports:
-      - "3001:3000"
+      - "${APP_HOST_PORT:-3001}:3000"
     networks:
       - xitouma-net
     restart: unless-stopped

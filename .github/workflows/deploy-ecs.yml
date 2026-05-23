@@ -12,34 +12,54 @@ concurrency:
   cancel-in-progress: true
 
 env:
+  ACR_REGISTRY: crpi-df6i5zrps8a8t6ig.cn-shenzhen.personal.cr.aliyuncs.com
+  IMAGE_NAME: song52wow/xitouma-service
   DEPLOY_PATH: ${{ vars.ECS_DEPLOY_PATH || '/opt/xitouma-backend' }}
   COMPOSE_PROJECT_NAME: ${{ vars.ECS_COMPOSE_PROJECT || 'xitouma-backend' }}
   ECS_PORT: ${{ secrets.ALIYUN_ECS_PORT || '22' }}
   APP_HOST_PORT: ${{ vars.ECS_APP_PORT || '3001' }}
 
 jobs:
-  deploy:
-    name: Build and deploy
+  build-and-push:
+    name: Build image and push to ACR
     runs-on: ubuntu-latest
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
+      - name: Validate ACR credentials
+        run: |
+          test -n "${{ secrets.ACR_USERNAME }}" || (echo "Missing secret: ACR_USERNAME" && exit 1)
+          test -n "${{ secrets.ACR_PASSWORD }}" || (echo "Missing secret: ACR_PASSWORD" && exit 1)
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to ACR
+        uses: docker/login-action@v3
         with:
-          node-version: 22
-          cache: npm
+          registry: ${{ env.ACR_REGISTRY }}
+          username: ${{ secrets.ACR_USERNAME }}
+          password: ${{ secrets.ACR_PASSWORD }}
 
-      - name: Install dependencies
-        run: npm ci
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ env.ACR_REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+            ${{ env.ACR_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
 
-      - name: Generate Prisma client
-        run: npx prisma generate
+  deploy:
+    name: Deploy to ECS
+    needs: build-and-push
+    runs-on: ubuntu-latest
 
-      - name: Build backend
-        run: npm run build
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
 
       - name: Validate deployment configuration
         env:
@@ -74,16 +94,8 @@ jobs:
           if [ "${#missing[@]}" -gt 0 ]; then
             echo "Missing GitHub Actions configuration:"
             printf '  - %s\n' "${missing[@]}"
-            echo ""
-            echo "Expected layout:"
-            echo "  Secrets: POSTGRES_PASSWORD, JWT_SECRET, WECHAT_SECRET, WEATHER_API_KEY (optional)"
-            echo "  Variables: POSTGRES_USER, POSTGRES_DB, WECHAT_APPID, CORS_ORIGIN, ..."
-            echo "  Legacy: secret ECS_ENV_PRODUCTION (full .env.production file)"
             exit 1
           fi
-
-      - name: Package source
-        run: git archive --format=tar.gz --output=/tmp/xitouma-backend.tar.gz HEAD
 
       - name: Prepare SSH
         env:
@@ -95,17 +107,8 @@ jobs:
           echo "$ALIYUN_ECS_SSH_KEY" > ~/.ssh/aliyun_ecs
           sed -i 's/\r$//' ~/.ssh/aliyun_ecs
           chmod 600 ~/.ssh/aliyun_ecs
-
-          if ! ssh-keygen -y -f ~/.ssh/aliyun_ecs > /tmp/aliyun_ecs.pub 2>/dev/null; then
-            echo "::error::ALIYUN_ECS_SSH_KEY is not a valid private key."
-            echo "Paste the full key, including -----BEGIN ... PRIVATE KEY----- lines."
-            exit 1
-          fi
-
-          echo "Derived public key fingerprint (must match ECS authorized_keys):"
+          ssh-keygen -y -f ~/.ssh/aliyun_ecs > /tmp/aliyun_ecs.pub
           ssh-keygen -lf /tmp/aliyun_ecs.pub
-          echo "Expected on ECS: SHA256:BOggCXrPSLhv5F2ANFxXKGq41CFVyukkgkbn60s/nFI (github-actions-deploy)"
-
           ssh-keyscan -p "$ECS_PORT" -H "$ALIYUN_ECS_HOST" >> ~/.ssh/known_hosts 2>/dev/null
 
       - name: Test SSH connection
@@ -114,7 +117,7 @@ jobs:
           ALIYUN_ECS_USER: ${{ secrets.ALIYUN_ECS_USER }}
         run: |
           ssh -i ~/.ssh/aliyun_ecs -p "$ECS_PORT" -o BatchMode=yes -o IdentitiesOnly=yes \
-            "$ALIYUN_ECS_USER@$ALIYUN_ECS_HOST" "echo ssh-ok && whoami && mkdir -p '$DEPLOY_PATH/releases' '$DEPLOY_PATH/shared'"
+            "$ALIYUN_ECS_USER@$ALIYUN_ECS_HOST" "echo ssh-ok && mkdir -p '$DEPLOY_PATH'"
 
       - name: Write production env
         env:
@@ -133,40 +136,35 @@ jobs:
           POSTGRES_HOST: ${{ vars.POSTGRES_HOST }}
         run: node scripts/render-production-env.mjs /tmp/.env.production
 
-      - name: Upload release files
+      - name: Upload compose and env
         env:
           ALIYUN_ECS_HOST: ${{ secrets.ALIYUN_ECS_HOST }}
           ALIYUN_ECS_USER: ${{ secrets.ALIYUN_ECS_USER }}
         run: |
-          ssh -i ~/.ssh/aliyun_ecs -p "$ECS_PORT" "$ALIYUN_ECS_USER@$ALIYUN_ECS_HOST" \
-            "mkdir -p '$DEPLOY_PATH/releases/${GITHUB_SHA}' '$DEPLOY_PATH/shared'"
-          scp -i ~/.ssh/aliyun_ecs -P "$ECS_PORT" /tmp/xitouma-backend.tar.gz \
-            "$ALIYUN_ECS_USER@$ALIYUN_ECS_HOST:$DEPLOY_PATH/releases/${GITHUB_SHA}/source.tar.gz"
+          scp -i ~/.ssh/aliyun_ecs -P "$ECS_PORT" docker-compose.prod.yml \
+            "$ALIYUN_ECS_USER@$ALIYUN_ECS_HOST:$DEPLOY_PATH/docker-compose.prod.yml"
           scp -i ~/.ssh/aliyun_ecs -P "$ECS_PORT" /tmp/.env.production \
-            "$ALIYUN_ECS_USER@$ALIYUN_ECS_HOST:$DEPLOY_PATH/shared/.env.production"
+            "$ALIYUN_ECS_USER@$ALIYUN_ECS_HOST:$DEPLOY_PATH/.env.production"
 
       - name: Deploy on ECS
         env:
           ALIYUN_ECS_HOST: ${{ secrets.ALIYUN_ECS_HOST }}
           ALIYUN_ECS_USER: ${{ secrets.ALIYUN_ECS_USER }}
         run: |
-          ssh -i ~/.ssh/aliyun_ecs -p "$ECS_PORT" "$ALIYUN_ECS_USER@$ALIYUN_ECS_HOST" \
-            "DEPLOY_PATH='$DEPLOY_PATH' RELEASE_ID='${GITHUB_SHA}' COMPOSE_PROJECT_NAME='$COMPOSE_PROJECT_NAME' APP_HOST_PORT='$APP_HOST_PORT' bash -s" <<'REMOTE_SCRIPT'
+          ssh -i ~/.ssh/aliyun_ecs -p "$ECS_PORT" -o BatchMode=yes -o IdentitiesOnly=yes \
+            "$ALIYUN_ECS_USER@$ALIYUN_ECS_HOST" \
+            "ACR_REGISTRY='$ACR_REGISTRY' IMAGE_NAME='$IMAGE_NAME' RELEASE_ID='${GITHUB_SHA}' DEPLOY_PATH='$DEPLOY_PATH' COMPOSE_PROJECT_NAME='$COMPOSE_PROJECT_NAME' APP_HOST_PORT='$APP_HOST_PORT' bash -s" <<'REMOTE_SCRIPT'
           set -euo pipefail
 
           cd "$DEPLOY_PATH"
-          tar -xzf "releases/$RELEASE_ID/source.tar.gz" -C "releases/$RELEASE_ID"
-          cp shared/.env.production "releases/$RELEASE_ID/.env.production"
-          ln -sfn "releases/$RELEASE_ID" current
+          export XITOUMA_IMAGE="${ACR_REGISTRY}/${IMAGE_NAME}:${RELEASE_ID}"
 
-          cd current
-          docker compose -p "$COMPOSE_PROJECT_NAME" -f docker-compose.prod.yml up -d --build --remove-orphans
+          docker pull "$XITOUMA_IMAGE"
+          APP_HOST_PORT="$APP_HOST_PORT" XITOUMA_IMAGE="$XITOUMA_IMAGE" \
+            docker compose -p "$COMPOSE_PROJECT_NAME" -f docker-compose.prod.yml up -d --no-build --remove-orphans
           docker compose -p "$COMPOSE_PROJECT_NAME" -f docker-compose.prod.yml ps
 
           sleep 8
           curl -fsS "http://127.0.0.1:${APP_HOST_PORT}/health"
-
-          cd "$DEPLOY_PATH"
-          find releases -mindepth 1 -maxdepth 1 -type d | sort | head -n -5 | xargs -r rm -rf
           docker image prune -f
           REMOTE_SCRIPT
