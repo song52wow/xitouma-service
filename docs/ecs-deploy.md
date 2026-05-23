@@ -28,9 +28,21 @@ Docker Compose on the server.
 | Secret | Description |
 |--------|-------------|
 | `ALIYUN_ECS_HOST` | ECS public IP or domain |
-| `ALIYUN_ECS_USER` | SSH user (`deploy`) |
-| `ALIYUN_ECS_SSH_KEY` | SSH private key |
+| `ALIYUN_ECS_USER` | Must be `deploy` (not `root`) |
+| `ALIYUN_ECS_SSH_KEY` | Private key that matches ECS `github-actions-deploy` |
 | `ALIYUN_ECS_PORT` | Optional. Defaults to `22` |
+
+`ALIYUN_ECS_SSH_KEY` must be the **full private key** (with `BEGIN`/`END` lines), not the
+`.pub` file. On this ECS the matching public key fingerprint is:
+
+`SHA256:BOggCXrPSLhv5F2ANFxXKGq41CFVyukkgkbn60s/nFI`
+
+If you have root access to the server, the key pair lives at
+`/home/deploy/.ssh/deploy_key` (private) and `deploy_key.pub` (public). Copy the private
+key into the GitHub secret; never commit it to the repository.
+
+The **Prepare SSH** workflow step prints the derived fingerprint so you can confirm the
+secret matches before upload runs.
 
 ### App Secrets (sensitive)
 

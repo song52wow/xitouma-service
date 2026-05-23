@@ -88,12 +88,33 @@ jobs:
       - name: Prepare SSH
         env:
           ALIYUN_ECS_HOST: ${{ secrets.ALIYUN_ECS_HOST }}
+          ALIYUN_ECS_USER: ${{ secrets.ALIYUN_ECS_USER }}
           ALIYUN_ECS_SSH_KEY: ${{ secrets.ALIYUN_ECS_SSH_KEY }}
         run: |
           install -m 700 -d ~/.ssh
-          printf '%s\n' "$ALIYUN_ECS_SSH_KEY" > ~/.ssh/aliyun_ecs
+          echo "$ALIYUN_ECS_SSH_KEY" > ~/.ssh/aliyun_ecs
+          sed -i 's/\r$//' ~/.ssh/aliyun_ecs
           chmod 600 ~/.ssh/aliyun_ecs
-          ssh-keyscan -p "$ECS_PORT" "$ALIYUN_ECS_HOST" >> ~/.ssh/known_hosts
+
+          if ! ssh-keygen -y -f ~/.ssh/aliyun_ecs > /tmp/aliyun_ecs.pub 2>/dev/null; then
+            echo "::error::ALIYUN_ECS_SSH_KEY is not a valid private key."
+            echo "Paste the full key, including -----BEGIN ... PRIVATE KEY----- lines."
+            exit 1
+          fi
+
+          echo "Derived public key fingerprint (must match ECS authorized_keys):"
+          ssh-keygen -lf /tmp/aliyun_ecs.pub
+          echo "Expected on ECS: SHA256:BOggCXrPSLhv5F2ANFxXKGq41CFVyukkgkbn60s/nFI (github-actions-deploy)"
+
+          ssh-keyscan -p "$ECS_PORT" -H "$ALIYUN_ECS_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Test SSH connection
+        env:
+          ALIYUN_ECS_HOST: ${{ secrets.ALIYUN_ECS_HOST }}
+          ALIYUN_ECS_USER: ${{ secrets.ALIYUN_ECS_USER }}
+        run: |
+          ssh -i ~/.ssh/aliyun_ecs -p "$ECS_PORT" -o BatchMode=yes -o IdentitiesOnly=yes \
+            "$ALIYUN_ECS_USER@$ALIYUN_ECS_HOST" "echo ssh-ok && whoami && mkdir -p '$DEPLOY_PATH/releases' '$DEPLOY_PATH/shared'"
 
       - name: Write production env
         env:
