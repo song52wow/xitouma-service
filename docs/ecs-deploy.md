@@ -4,7 +4,7 @@
 
 - `.env.production`: production environment variables, copied from `.env.production.example`.
 - `Dockerfile`: builds the NestJS app and Prisma client.
-- `docker-compose.prod.yml`: runs the app and PostgreSQL on the ECS instance.
+- `docker-compose.prod.yml`: runs the app on the ECS instance and joins the external `xitouma-net` network where PostgreSQL already runs.
 - `deploy/nginx.conf`: reverse proxy example. Replace `your-domain.example.com`.
 
 ## Deploy
@@ -28,13 +28,26 @@ Required GitHub Secrets:
 - `ALIYUN_ECS_HOST`: ECS public IP or domain.
 - `ALIYUN_ECS_USER`: SSH user with permission to run Docker Compose.
 - `ALIYUN_ECS_SSH_KEY`: private key for the SSH user.
-- `ECS_ENV_PRODUCTION`: full contents of the production `.env.production` file.
+- `DATABASE_URL`, `JWT_SECRET`, `WECHAT_APPID`, `WECHAT_SECRET`, `CORS_ORIGIN`
+- `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`
+
+Optional GitHub Secrets (workflow defaults apply when omitted):
+
+- `JWT_ACCESS_EXPIRES_IN` (default `7200`)
+- `JWT_REFRESH_EXPIRES_IN` (default `2592000`)
+- `WECHAT_JSCODE2SESSION_URL` (default WeChat endpoint)
+- `WEATHER_API_KEY` (default empty)
+- `DEFAULT_TIMEZONE` (default `Asia/Shanghai`)
+- `BACKFILL_WINDOW_DAYS` (default `30`)
+- `HOST` (default `0.0.0.0`)
+- `PORT` (default `3000`)
 
 Optional GitHub Secrets and Variables:
 
 - Secret `ALIYUN_ECS_PORT`: SSH port. Defaults to `22`.
 - Variable `ECS_DEPLOY_PATH`: server deploy directory. Defaults to `/opt/xitouma-backend`.
 - Variable `ECS_COMPOSE_PROJECT`: Docker Compose project name. Defaults to `xitouma-backend`.
+- Variable `ECS_APP_PORT`: host port mapped to the app container. Defaults to `3001`.
 
 One-time ECS setup:
 

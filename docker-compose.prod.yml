@@ -5,25 +5,13 @@ services:
       dockerfile: Dockerfile
     env_file:
       - .env.production
-    depends_on:
-      postgres:
-        condition: service_healthy
     ports:
-      - "3000:3000"
+      - "3001:3000"
+    networks:
+      - xitouma-net
     restart: unless-stopped
 
-  postgres:
-    image: postgres:16-alpine
-    env_file:
-      - .env.production
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    restart: unless-stopped
-
-volumes:
-  pgdata:
+networks:
+  xitouma-net:
+    external: true
+    name: xitouma-net
