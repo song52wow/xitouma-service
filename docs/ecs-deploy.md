@@ -13,52 +13,64 @@
 cp .env.production.example .env.production
 # Edit .env.production before starting.
 docker compose -f docker-compose.prod.yml up -d --build
-curl http://127.0.0.1:3000/health
+curl http://127.0.0.1:3001/health
 ```
 
 ## GitHub Actions Deploy
 
 The workflow is in `.github/workflows/deploy-ecs.yml`. It builds the NestJS
 backend on GitHub Actions, uploads the current commit to the ECS instance over
-SSH, writes `.env.production` from a GitHub Secret, then runs Docker Compose on
-the server.
+SSH, assembles `.env.production` from GitHub Secrets and Variables, then runs
+Docker Compose on the server.
 
-Required GitHub configuration (each key may be a **Secret** or a **Variable** with the same name):
+### SSH Secrets (required)
 
-- `ALIYUN_ECS_HOST`: ECS public IP or domain.
-- `ALIYUN_ECS_USER`: SSH user with permission to run Docker Compose.
-- `ALIYUN_ECS_SSH_KEY`: private key for the SSH user (**Secret only**).
-- `DATABASE_URL`, `JWT_SECRET`, `WECHAT_APPID`, `WECHAT_SECRET`, `CORS_ORIGIN`
-- `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`
+| Secret | Description |
+|--------|-------------|
+| `ALIYUN_ECS_HOST` | ECS public IP or domain |
+| `ALIYUN_ECS_USER` | SSH user (`deploy`) |
+| `ALIYUN_ECS_SSH_KEY` | SSH private key |
+| `ALIYUN_ECS_PORT` | Optional. Defaults to `22` |
 
-`DATABASE_URL` must use host `postgres` (Docker network alias), for example:
-`postgresql://xitouma:<password>@postgres:5432/xitouma?schema=public`
+### App Secrets (sensitive)
 
-Legacy option: set secret `ECS_ENV_PRODUCTION` to the full `.env.production` file instead of split keys.
+| Secret | Description |
+|--------|-------------|
+| `POSTGRES_PASSWORD` | PostgreSQL password |
+| `JWT_SECRET` | JWT signing secret |
+| `WECHAT_SECRET` | WeChat mini program secret |
+| `WEATHER_API_KEY` | Optional. QWeather API key. Leave empty to disable server-side weather |
 
-Optional GitHub Secrets (workflow defaults apply when omitted):
+### App Variables (non-sensitive)
 
-- `JWT_ACCESS_EXPIRES_IN` (default `7200`)
-- `JWT_REFRESH_EXPIRES_IN` (default `2592000`)
-- `WECHAT_JSCODE2SESSION_URL` (default WeChat endpoint)
-- `WEATHER_API_KEY` (default empty)
-- `DEFAULT_TIMEZONE` (default `Asia/Shanghai`)
-- `BACKFILL_WINDOW_DAYS` (default `30`)
-- `HOST` (default `0.0.0.0`)
-- `PORT` (default `3000`)
+| Variable | Description |
+|----------|-------------|
+| `POSTGRES_USER` | PostgreSQL user |
+| `POSTGRES_DB` | PostgreSQL database name |
+| `WECHAT_APPID` | WeChat mini program AppID |
+| `WECHAT_JSCODE2SESSION_URL` | Optional. Defaults to WeChat endpoint |
+| `DEFAULT_TIMEZONE` | Optional. Defaults to `Asia/Shanghai` |
+| `BACKFILL_WINDOW_DAYS` | Optional. Defaults to `30` |
+| `CORS_ORIGIN` | Allowed CORS origin(s), comma-separated |
+| `ECS_DEPLOY_PATH` | Optional. Defaults to `/opt/xitouma-backend` |
+| `ECS_COMPOSE_PROJECT` | Optional. Defaults to `xitouma-backend` |
+| `ECS_APP_PORT` | Optional. Host port for health check. Defaults to `3001` |
+| `POSTGRES_HOST` | Optional. Defaults to `postgres` (Docker network alias) |
 
-Optional GitHub Secrets and Variables:
+The workflow builds `DATABASE_URL` automatically:
 
-- Secret `ALIYUN_ECS_PORT`: SSH port. Defaults to `22`.
-- Variable `ECS_DEPLOY_PATH`: server deploy directory. Defaults to `/opt/xitouma-backend`.
-- Variable `ECS_COMPOSE_PROJECT`: Docker Compose project name. Defaults to `xitouma-backend`.
-- Variable `ECS_APP_PORT`: host port mapped to the app container. Defaults to `3001`.
+```text
+postgresql://<POSTGRES_USER>:<POSTGRES_PASSWORD>@postgres:5432/<POSTGRES_DB>?schema=public
+```
+
+Legacy option: set secret `ECS_ENV_PRODUCTION` to the full `.env.production`
+file instead of the split keys above.
 
 One-time ECS setup:
 
 ```bash
 sudo mkdir -p /opt/xitouma-backend
-sudo chown -R "$USER":"$USER" /opt/xitouma-backend
+sudo chown -R deploy:deploy /opt/xitouma-backend
 docker compose version
 ```
 
@@ -74,6 +86,6 @@ an interactive password prompt.
 
 ## Production Notes
 
-- Replace `JWT_SECRET`, `POSTGRES_PASSWORD`, `WECHAT_APPID`, and `WECHAT_SECRET`.
+- The app listens on container port `3000` and is published on host port `3001` by default.
 - Use `docker compose -f docker-compose.prod.yml logs -f app` to inspect app logs.
 - The app runs `prisma migrate deploy` before startup.
