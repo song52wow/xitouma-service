@@ -107,4 +107,5 @@ git push main
 |------|------|
 | `Timed out waiting for ...` | 看 ACR **构建记录**是否失败；确认 tag 与 `ACR_IMAGE_TAG` / commit 一致 |
 | ECS `docker pull` 失败 / `pull access denied` | 确认 GitHub `ACR_USERNAME` / `ACR_PASSWORD` 正确；或 SSH 到 ECS 手动 `docker login` 个人版 registry 后重试 |
+| `curl: (56) Recv failure` / 健康检查失败 | 多为启动未完成（`prisma migrate deploy` 较慢）或应用崩溃；workflow 已改为最多等待 60s 并输出容器日志。仍失败时在 ECS 执行 `docker compose -f docker-compose.prod.yml logs app` 查 DB/环境变量 |
 | 部署了旧代码 | 确认 ACR 规则分支与 push 分支一致；`latest` 方案确认已重新构建 |

@@ -191,13 +191,38 @@ jobs:
 
           cd "$DEPLOY_PATH"
           export XITOUMA_IMAGE="${ACR_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}"
+          export APP_HOST_PORT="${APP_HOST_PORT:-3001}"
 
           docker pull "$XITOUMA_IMAGE"
           APP_HOST_PORT="$APP_HOST_PORT" XITOUMA_IMAGE="$XITOUMA_IMAGE" \
             docker compose -p "$COMPOSE_PROJECT_NAME" -f docker-compose.prod.yml up -d --no-build --remove-orphans
           docker compose -p "$COMPOSE_PROJECT_NAME" -f docker-compose.prod.yml ps
 
-          sleep 8
-          curl -fsS "http://127.0.0.1:${APP_HOST_PORT}/health"
+          host_port="$(
+            docker compose -p "$COMPOSE_PROJECT_NAME" -f docker-compose.prod.yml port -T app 3000 \
+              | sed 's/.*://'
+          )"
+          health_url="http://127.0.0.1:${host_port}/health"
+          echo "Waiting for ${health_url} (migrate + app startup)..."
+
+          health_ok=0
+          for attempt in $(seq 1 30); do
+            if curl -fsS "$health_url" >/dev/null 2>&1; then
+              echo "Health check passed (attempt ${attempt}/30)"
+              curl -fsS "$health_url"
+              health_ok=1
+              break
+            fi
+            echo "Not ready yet (${attempt}/30)..."
+            sleep 2
+          done
+
+          if [ "$health_ok" -ne 1 ]; then
+            echo "Health check failed after 60s"
+            docker compose -p "$COMPOSE_PROJECT_NAME" -f docker-compose.prod.yml ps -a
+            docker compose -p "$COMPOSE_PROJECT_NAME" -f docker-compose.prod.yml logs --tail 120 app || true
+            exit 1
+          fi
+
           docker image prune -f
           REMOTE_SCRIPT

@@ -9,7 +9,7 @@ CREATE TYPE "UserStatus" AS ENUM ('active', 'merged', 'disabled');
 
 -- CreateTable
 CREATE TABLE "User" (
-    "id" TEXT NOT NULL,
+    "id" UUID NOT NULL,
     "nickname" VARCHAR(64) NOT NULL,
     "avatarUrl" TEXT NOT NULL DEFAULT '',
     "gender" INTEGER NOT NULL DEFAULT 0,
@@ -28,7 +28,7 @@ CREATE TABLE "User" (
 
 -- CreateTable
 CREATE TABLE "UserIdentity" (
-    "id" TEXT NOT NULL,
+    "id" UUID NOT NULL,
     "userId" UUID NOT NULL,
     "provider" "IdentityProvider" NOT NULL,
     "providerUserId" VARCHAR(128) NOT NULL,
@@ -42,7 +42,7 @@ CREATE TABLE "UserIdentity" (
 
 -- CreateTable
 CREATE TABLE "WashRecord" (
-    "id" TEXT NOT NULL,
+    "id" UUID NOT NULL,
     "userId" UUID NOT NULL,
     "recordDate" DATE NOT NULL,
     "status" "WashStatus" NOT NULL,
@@ -73,7 +73,7 @@ CREATE TABLE "UserStatistics" (
 
 -- CreateTable
 CREATE TABLE "AdviceLog" (
-    "id" TEXT NOT NULL,
+    "id" UUID NOT NULL,
     "userId" UUID NOT NULL,
     "decision" VARCHAR(16) NOT NULL,
     "confidence" INTEGER NOT NULL,
@@ -87,7 +87,7 @@ CREATE TABLE "AdviceLog" (
 
 -- CreateTable
 CREATE TABLE "SyncBatch" (
-    "id" TEXT NOT NULL,
+    "id" UUID NOT NULL,
     "userId" UUID NOT NULL,
     "clientId" VARCHAR(128) NOT NULL,
     "idempotencyKey" VARCHAR(128) NOT NULL,
