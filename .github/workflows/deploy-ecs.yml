@@ -165,6 +165,20 @@ jobs:
           scp -i ~/.ssh/aliyun_ecs -P "$ECS_PORT" /tmp/.env.production \
             "$ALIYUN_ECS_USER@$ALIYUN_ECS_HOST:$DEPLOY_PATH/.env.production"
 
+      - name: Log in to ACR on ECS
+        env:
+          ACR_USERNAME: ${{ secrets.ACR_USERNAME }}
+          ACR_PASSWORD: ${{ secrets.ACR_PASSWORD }}
+          ALIYUN_ECS_HOST: ${{ secrets.ALIYUN_ECS_HOST }}
+          ALIYUN_ECS_USER: ${{ secrets.ALIYUN_ECS_USER }}
+        run: |
+          test -n "$ACR_USERNAME" || (echo "Missing secret: ACR_USERNAME" && exit 1)
+          test -n "$ACR_PASSWORD" || (echo "Missing secret: ACR_PASSWORD" && exit 1)
+
+          printf '%s' "$ACR_PASSWORD" | ssh -i ~/.ssh/aliyun_ecs -p "$ECS_PORT" -o BatchMode=yes -o IdentitiesOnly=yes \
+            "$ALIYUN_ECS_USER@$ALIYUN_ECS_HOST" \
+            "docker login '$ACR_REGISTRY' -u '$ACR_USERNAME' --password-stdin"
+
       - name: Deploy on ECS
         env:
           ALIYUN_ECS_HOST: ${{ secrets.ALIYUN_ECS_HOST }}

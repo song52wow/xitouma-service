@@ -79,7 +79,7 @@ ${ACR_REGISTRY}/song52wow/xitouma-service:${IMAGE_TAG}
 | `ACR_USERNAME` | ACR 登录用户名 |
 | `ACR_PASSWORD` | ACR 登录密码 |
 
-ECS 主机上需已 `docker login` 同一 registry（拉取私有镜像）。
+部署 workflow 会在 ECS 上自动执行 `docker login`（使用 `ACR_USERNAME` / `ACR_PASSWORD`）。若手动在 ECS 上拉镜像，也需先登录同一 registry。
 
 ### 可选 Variables
 
@@ -106,5 +106,5 @@ git push main
 | 现象 | 处理 |
 |------|------|
 | `Timed out waiting for ...` | 看 ACR **构建记录**是否失败；确认 tag 与 `ACR_IMAGE_TAG` / commit 一致 |
-| ECS `docker pull` 失败 | 在 ECS 上执行 `docker login` 个人版 registry |
+| ECS `docker pull` 失败 / `pull access denied` | 确认 GitHub `ACR_USERNAME` / `ACR_PASSWORD` 正确；或 SSH 到 ECS 手动 `docker login` 个人版 registry 后重试 |
 | 部署了旧代码 | 确认 ACR 规则分支与 push 分支一致；`latest` 方案确认已重新构建 |
