@@ -198,10 +198,13 @@ jobs:
             docker compose -p "$COMPOSE_PROJECT_NAME" -f docker-compose.prod.yml up -d --no-build --remove-orphans
           docker compose -p "$COMPOSE_PROJECT_NAME" -f docker-compose.prod.yml ps
 
-          host_port="$(
-            docker compose -p "$COMPOSE_PROJECT_NAME" -f docker-compose.prod.yml port -T app 3000 \
+          host_port="${APP_HOST_PORT:-3001}"
+          if mapped_port="$(
+            docker compose -p "$COMPOSE_PROJECT_NAME" -f docker-compose.prod.yml port app 3000 2>/dev/null \
               | sed 's/.*://'
-          )"
+          )" && [ -n "$mapped_port" ]; then
+            host_port="$mapped_port"
+          fi
           health_url="http://127.0.0.1:${host_port}/health"
           echo "Waiting for ${health_url} (migrate + app startup)..."
 
