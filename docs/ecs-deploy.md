@@ -18,12 +18,12 @@ curl http://127.0.0.1:3001/health
 
 ## GitHub Actions Deploy
 
-The workflow is in `.github/workflows/deploy-ecs.yml`. It builds the Docker image
-on GitHub Actions, pushes it to Aliyun ACR, then SSHs to ECS to pull the image
-and start the container. The ECS host does not build images (Docker Hub is often
-unreachable from mainland China).
+The workflow is in `.github/workflows/deploy-ecs.yml`. **Docker images are built
+by Aliyun ACR** (auto-build on git push). GitHub Actions waits for the image tag,
+then SSHs to ECS to pull and start the container. See [acr-autobuild.md](./acr-autobuild.md)
+for ACR console setup.
 
-### ACR Secrets (required for image build)
+### ACR Secrets (required to verify image before deploy)
 
 | Secret | Description |
 |--------|-------------|
@@ -31,6 +31,8 @@ unreachable from mainland China).
 | `ACR_PASSWORD` | Aliyun container registry password |
 
 Image: `crpi-df6i5zrps8a8t6ig.cn-shenzhen.personal.cr.aliyuncs.com/song52wow/xitouma-service`
+
+If ACR build rules only tag `latest`, set GitHub repository variable `ACR_IMAGE_TAG=latest`.
 
 ### SSH Secrets (required)
 
@@ -77,6 +79,9 @@ secret matches before upload runs.
 | `ECS_COMPOSE_PROJECT` | Optional. Defaults to `xitouma-backend` |
 | `ECS_APP_PORT` | Optional. Host port for health check. Defaults to `3001` |
 | `POSTGRES_HOST` | Optional. Defaults to `postgres` (Docker network alias) |
+| `ACR_IMAGE_TAG` | Optional. Must match ACR build rule tag. Defaults to commit SHA |
+| `ACR_WAIT_ATTEMPTS` | Optional. Defaults to `40` |
+| `ACR_WAIT_INTERVAL_SEC` | Optional. Defaults to `30` |
 
 The workflow builds `DATABASE_URL` automatically:
 

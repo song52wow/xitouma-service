@@ -1,11 +1,19 @@
 name: Deploy Backend to Aliyun ECS
 
+# Image build runs in Aliyun ACR (code push auto-build). This workflow only
+# waits for the image tag, then deploys to ECS. See docs/acr-autobuild.md.
+
 on:
   push:
     branches:
       - main
       - master
   workflow_dispatch:
+    inputs:
+      image_tag:
+        description: ACR image tag to deploy (defaults to commit SHA or ACR_IMAGE_TAG var)
+        required: false
+        type: string
 
 concurrency:
   group: aliyun-ecs-backend
@@ -14,47 +22,58 @@ concurrency:
 env:
   ACR_REGISTRY: crpi-df6i5zrps8a8t6ig.cn-shenzhen.personal.cr.aliyuncs.com
   IMAGE_NAME: song52wow/xitouma-service
+  # Set repo variable ACR_IMAGE_TAG=latest if ACR rules only publish :latest
+  IMAGE_TAG: ${{ inputs.image_tag || vars.ACR_IMAGE_TAG || github.sha }}
   DEPLOY_PATH: ${{ vars.ECS_DEPLOY_PATH || '/opt/xitouma-backend' }}
   COMPOSE_PROJECT_NAME: ${{ vars.ECS_COMPOSE_PROJECT || 'xitouma-backend' }}
   ECS_PORT: ${{ secrets.ALIYUN_ECS_PORT || '22' }}
   APP_HOST_PORT: ${{ vars.ECS_APP_PORT || '3001' }}
+  ACR_WAIT_ATTEMPTS: ${{ vars.ACR_WAIT_ATTEMPTS || '40' }}
+  ACR_WAIT_INTERVAL_SEC: ${{ vars.ACR_WAIT_INTERVAL_SEC || '30' }}
 
 jobs:
-  build-and-push:
-    name: Build image and push to ACR
+  wait-for-acr-image:
+    name: Wait for ACR image
     runs-on: ubuntu-latest
 
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
       - name: Validate ACR credentials
         run: |
           test -n "${{ secrets.ACR_USERNAME }}" || (echo "Missing secret: ACR_USERNAME" && exit 1)
           test -n "${{ secrets.ACR_PASSWORD }}" || (echo "Missing secret: ACR_PASSWORD" && exit 1)
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Login to ACR
+      - name: Log in to ACR
         uses: docker/login-action@v3
         with:
           registry: ${{ env.ACR_REGISTRY }}
           username: ${{ secrets.ACR_USERNAME }}
           password: ${{ secrets.ACR_PASSWORD }}
 
-      - name: Build and push image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          push: true
-          tags: |
-            ${{ env.ACR_REGISTRY }}/${{ env.IMAGE_NAME }}:latest
-            ${{ env.ACR_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+      - name: Wait until image tag exists
+        run: |
+          image="${ACR_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}"
+          attempts="${ACR_WAIT_ATTEMPTS}"
+          interval="${ACR_WAIT_INTERVAL_SEC}"
+
+          echo "Waiting for ACR auto-build to publish: ${image}"
+          echo "Attempts: ${attempts}, interval: ${interval}s"
+
+          for attempt in $(seq 1 "$attempts"); do
+            if docker manifest inspect "$image" >/dev/null 2>&1; then
+              echo "Image is ready (attempt ${attempt}/${attempts})"
+              exit 0
+            fi
+            echo "Not ready yet (${attempt}/${attempts})..."
+            sleep "$interval"
+          done
+
+          echo "Timed out waiting for ${image}"
+          echo "Check ACR build logs and that the build rule tag matches IMAGE_TAG (${IMAGE_TAG})."
+          exit 1
 
   deploy:
     name: Deploy to ECS
-    needs: build-and-push
+    needs: wait-for-acr-image
     runs-on: ubuntu-latest
 
     steps:
@@ -153,11 +172,11 @@ jobs:
         run: |
           ssh -i ~/.ssh/aliyun_ecs -p "$ECS_PORT" -o BatchMode=yes -o IdentitiesOnly=yes \
             "$ALIYUN_ECS_USER@$ALIYUN_ECS_HOST" \
-            "ACR_REGISTRY='$ACR_REGISTRY' IMAGE_NAME='$IMAGE_NAME' RELEASE_ID='${GITHUB_SHA}' DEPLOY_PATH='$DEPLOY_PATH' COMPOSE_PROJECT_NAME='$COMPOSE_PROJECT_NAME' APP_HOST_PORT='$APP_HOST_PORT' bash -s" <<'REMOTE_SCRIPT'
+            "ACR_REGISTRY='$ACR_REGISTRY' IMAGE_NAME='$IMAGE_NAME' IMAGE_TAG='$IMAGE_TAG' DEPLOY_PATH='$DEPLOY_PATH' COMPOSE_PROJECT_NAME='$COMPOSE_PROJECT_NAME' APP_HOST_PORT='$APP_HOST_PORT' bash -s" <<'REMOTE_SCRIPT'
           set -euo pipefail
 
           cd "$DEPLOY_PATH"
-          export XITOUMA_IMAGE="${ACR_REGISTRY}/${IMAGE_NAME}:${RELEASE_ID}"
+          export XITOUMA_IMAGE="${ACR_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}"
 
           docker pull "$XITOUMA_IMAGE"
           APP_HOST_PORT="$APP_HOST_PORT" XITOUMA_IMAGE="$XITOUMA_IMAGE" \
