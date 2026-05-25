@@ -27,18 +27,22 @@
 - **海外机器构建**：若 Dockerfile 基础镜像是 `node:*` 等公网镜像，可开启；若构建经常超时再关闭。
 - **不使用缓存**：建议关闭（加快重复构建）。
 
-### 3. 构建规则
+### 3. 构建规则（与当前 CI 对齐）
 
-仓库 → **构建** → **添加规则**（可为 `main` / `master` 各加一条，或只保留实际使用的分支）：
+建议两条规则（上下文均为 `/`，Dockerfile 为 `Dockerfile`）：
 
-| 参数 | 值 |
-|------|-----|
-| 类型 | Branch |
-| Branch/Tag | `main`（或 `master`） |
-| 构建上下文目录 | `/`（仓库根目录，与 `Dockerfile` 同级） |
-| Dockerfile 文件名 | `Dockerfile` |
+| 类型 | Branch/Tag 匹配 | ACR 镜像版本（示例） | GitHub 部署拉取的 tag |
+|------|-----------------|----------------------|------------------------|
+| Branch | `main` | `latest`（或你自定义的固定 tag） | 同左，见 `ACR_MAIN_IMAGE_TAG` |
+| Tag | `release-v*`（正则捕获 `$version`） | `release-v$version` 中的 **`$version` 部分** | 去掉 `release-v` 前缀后的版本号 |
 
-**镜像版本（Tag）必须与 GitHub 部署使用的 tag 一致**，见下一节。
+**Tag 规则示例**：Git 打 tag `release-v1.2.3` → ACR 若产出镜像 tag `1.2.3`，CI 会自动等待并部署 `:1.2.3`。
+
+若 ACR 实际产出的是**完整 tag 名** `release-v1.2.3`（未剥离前缀），在 GitHub Variables 设置：
+
+| 变量名 | 值 |
+|--------|-----|
+| `ACR_RELEASE_TAG_MODE` | `full` |
 
 ## 镜像 Tag 与 GitHub 对齐
 
@@ -48,27 +52,32 @@
 ${ACR_REGISTRY}/song52wow/xitouma-service:${IMAGE_TAG}
 ```
 
-`IMAGE_TAG` 优先级：
+Workflow 按 **push 类型** 自动解析 `IMAGE_TAG`：
 
-1. 手动运行 workflow 时填写的 `image_tag`
-2. 仓库变量 `ACR_IMAGE_TAG`
-3. 默认：`${{ github.sha }}`（完整 40 位 commit）
+| 触发 | 解析逻辑 |
+|------|----------|
+| `git push origin release-v1.2.3` | `1.2.3`（默认剥离 `release-v` 前缀） |
+| `git push origin main` | `ACR_MAIN_IMAGE_TAG` → 否则 `ACR_IMAGE_TAG` → 否则 `latest` |
+| 手动 workflow_dispatch | 输入框 `image_tag`（必填才覆盖） |
 
-### 方案 A：按 commit 部署（推荐，可回滚）
+### 发布版本（推荐）
 
-在 ACR 构建规则中配置镜像版本为**完整 Commit ID**（企业版可在规则里勾选「最近一次推送代码的 Commit ID」并设 40 位；或自定义 tag 模板包含完整 commit）。
+```bash
+git tag release-v1.2.3
+git push origin release-v1.2.3
+```
 
-无需改 GitHub 变量，workflow 默认用 `github.sha`。
+ACR 按 Tag 规则构建 → Actions 等待 `:1.2.3` → 部署 ECS。版本号与 Git tag 一一对应，可回滚。
 
-### 方案 B：仅 `latest`（个人版常见）
+### 日常 main 联调
 
-若构建规则只打 `latest`：
+```bash
+git push origin main
+```
 
-在 GitHub 仓库 **Settings → Secrets and variables → Actions → Variables** 增加：
+需保证 ACR **Branch: main** 规则的镜像版本与 `ACR_MAIN_IMAGE_TAG`（或默认 `latest`）一致。
 
-| 变量名 | 值 |
-|--------|-----|
-| `ACR_IMAGE_TAG` | `latest` |
+注意：`:latest` 无法区分「旧镜像已存在」与「本次构建已完成」，生产发布请用 `release-v*` tag。
 
 ## GitHub Secrets / Variables
 
@@ -85,7 +94,9 @@ ${ACR_REGISTRY}/song52wow/xitouma-service:${IMAGE_TAG}
 
 | 变量 | 默认 | 说明 |
 |------|------|------|
-| `ACR_IMAGE_TAG` | （空，用 commit SHA） | 与 ACR 构建规则 tag 一致，如 `latest` |
+| `ACR_MAIN_IMAGE_TAG` | （空） | `main` 分支对应 ACR 镜像 tag，如 `latest` |
+| `ACR_IMAGE_TAG` | （空） | `main` 的备用 tag（`ACR_MAIN_IMAGE_TAG` 未设时生效） |
+| `ACR_RELEASE_TAG_MODE` | `version` | `version`：剥离 `release-v`；`full`：用完整 Git tag 名 |
 | `ACR_WAIT_ATTEMPTS` | `40` | 等待镜像次数 |
 | `ACR_WAIT_INTERVAL_SEC` | `30` | 每次间隔秒数（最长约 20 分钟） |
 
@@ -94,9 +105,13 @@ ${ACR_REGISTRY}/song52wow/xitouma-service:${IMAGE_TAG}
 ## 发布流程
 
 ```text
+git push release-v1.2.3
+    ├─► ACR：Tag 规则构建 → 推送 :1.2.3
+    └─► GitHub Actions：resolve tag → wait → deploy ECS
+
 git push main
-    ├─► ACR：自动构建并推送镜像
-    └─► GitHub Actions：wait-for-acr-image → deploy ECS
+    ├─► ACR：Branch 规则构建 → 推送 :latest（或你配置的 tag）
+    └─► GitHub Actions：resolve tag → wait → deploy ECS
 ```
 
 避免在 GitHub Actions 中再次构建同一镜像，否则会重复占用构建资源且 tag 可能冲突。

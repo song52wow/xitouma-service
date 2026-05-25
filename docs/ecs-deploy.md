@@ -32,7 +32,7 @@ for ACR console setup.
 
 Image: `crpi-df6i5zrps8a8t6ig.cn-shenzhen.personal.cr.aliyuncs.com/song52wow/xitouma-service`
 
-If ACR build rules only tag `latest`, set GitHub repository variable `ACR_IMAGE_TAG=latest`.
+ACR rules in use: **Branch `main`** + **Tag `release-v*` → image tag `$version`**. See [acr-autobuild.md](./acr-autobuild.md). For main-only `latest`, set `ACR_MAIN_IMAGE_TAG=latest`.
 
 ### SSH Secrets (required)
 
@@ -79,7 +79,9 @@ secret matches before upload runs.
 | `ECS_COMPOSE_PROJECT` | Optional. Defaults to `xitouma-backend` |
 | `ECS_APP_PORT` | Optional. Host port for health check. Defaults to `3001` |
 | `POSTGRES_HOST` | Optional. Defaults to `postgres` (Docker network alias) |
-| `ACR_IMAGE_TAG` | Optional. Must match ACR build rule tag. Defaults to commit SHA |
+| `ACR_MAIN_IMAGE_TAG` | Optional. `main` branch image tag. Defaults to `latest` |
+| `ACR_IMAGE_TAG` | Optional. Fallback for `main` when `ACR_MAIN_IMAGE_TAG` unset |
+| `ACR_RELEASE_TAG_MODE` | Optional. `version` (default) or `full` for `release-v*` tags |
 | `ACR_WAIT_ATTEMPTS` | Optional. Defaults to `40` |
 | `ACR_WAIT_INTERVAL_SEC` | Optional. Defaults to `30` |
 

@@ -1,29 +1,30 @@
 name: Deploy Backend to Aliyun ECS
 
-# Image build runs in Aliyun ACR (code push auto-build). This workflow only
-# waits for the image tag, then deploys to ECS. See docs/acr-autobuild.md.
+# Image build runs in Aliyun ACR (code push auto-build). This workflow resolves
+# IMAGE_TAG from the push (release tag or main branch), waits for ACR, then deploys.
+# See docs/acr-autobuild.md.
 
 on:
   push:
     branches:
       - main
       - master
+    tags:
+      - release-v*
   workflow_dispatch:
     inputs:
       image_tag:
-        description: ACR image tag to deploy (defaults to commit SHA or ACR_IMAGE_TAG var)
+        description: Override ACR image tag to deploy
         required: false
         type: string
 
 concurrency:
-  group: aliyun-ecs-backend
+  group: aliyun-ecs-backend-${{ github.ref }}
   cancel-in-progress: true
 
 env:
   ACR_REGISTRY: crpi-df6i5zrps8a8t6ig.cn-shenzhen.personal.cr.aliyuncs.com
   IMAGE_NAME: song52wow/xitouma-service
-  # Set repo variable ACR_IMAGE_TAG=latest if ACR rules only publish :latest
-  IMAGE_TAG: ${{ inputs.image_tag || vars.ACR_IMAGE_TAG || github.sha }}
   DEPLOY_PATH: ${{ vars.ECS_DEPLOY_PATH || '/opt/xitouma-backend' }}
   COMPOSE_PROJECT_NAME: ${{ vars.ECS_COMPOSE_PROJECT || 'xitouma-backend' }}
   ECS_PORT: ${{ secrets.ALIYUN_ECS_PORT || '22' }}
@@ -32,9 +33,66 @@ env:
   ACR_WAIT_INTERVAL_SEC: ${{ vars.ACR_WAIT_INTERVAL_SEC || '30' }}
 
 jobs:
+  resolve-image-tag:
+    name: Resolve ACR image tag
+    runs-on: ubuntu-latest
+    outputs:
+      image_tag: ${{ steps.resolve.outputs.image_tag }}
+      deploy_source: ${{ steps.resolve.outputs.deploy_source }}
+    steps:
+      - name: Resolve tag from push or input
+        id: resolve
+        env:
+          DISPATCH_TAG: ${{ inputs.image_tag }}
+          OVERRIDE_TAG: ${{ vars.ACR_IMAGE_TAG }}
+          MAIN_TAG: ${{ vars.ACR_MAIN_IMAGE_TAG }}
+          RELEASE_TAG_MODE: ${{ vars.ACR_RELEASE_TAG_MODE }}
+        run: |
+          set -euo pipefail
+
+          if [ -n "${DISPATCH_TAG}" ]; then
+            tag="${DISPATCH_TAG}"
+            source="workflow_dispatch"
+          elif [[ "${GITHUB_REF}" == refs/tags/release-v* ]]; then
+            ref_name="${GITHUB_REF_NAME}"
+            mode="${RELEASE_TAG_MODE:-version}"
+            case "$mode" in
+              full)
+                tag="${ref_name}"
+                ;;
+              version|*)
+                tag="${ref_name#release-v}"
+                if [ -z "$tag" ]; then
+                  echo "Git tag ${ref_name} does not contain a version after release-v"
+                  exit 1
+                fi
+                ;;
+            esac
+            source="release_tag"
+          elif [[ "${GITHUB_REF}" == refs/heads/main || "${GITHUB_REF}" == refs/heads/master ]]; then
+            if [ -n "${MAIN_TAG}" ]; then
+              tag="${MAIN_TAG}"
+            elif [ -n "${OVERRIDE_TAG}" ]; then
+              tag="${OVERRIDE_TAG}"
+            else
+              tag="latest"
+            fi
+            source="main_branch"
+          else
+            echo "Unsupported ref for deploy: ${GITHUB_REF}"
+            exit 1
+          fi
+
+          echo "Resolved IMAGE_TAG=${tag} (source=${source}, ref=${GITHUB_REF})"
+          echo "image_tag=${tag}" >> "$GITHUB_OUTPUT"
+          echo "deploy_source=${source}" >> "$GITHUB_OUTPUT"
+
   wait-for-acr-image:
     name: Wait for ACR image
+    needs: resolve-image-tag
     runs-on: ubuntu-latest
+    env:
+      IMAGE_TAG: ${{ needs.resolve-image-tag.outputs.image_tag }}
 
     steps:
       - name: Validate ACR credentials
@@ -50,13 +108,20 @@ jobs:
           password: ${{ secrets.ACR_PASSWORD }}
 
       - name: Wait until image tag exists
+        env:
+          DEPLOY_SOURCE: ${{ needs.resolve-image-tag.outputs.deploy_source }}
         run: |
           image="${ACR_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}"
           attempts="${ACR_WAIT_ATTEMPTS}"
           interval="${ACR_WAIT_INTERVAL_SEC}"
 
+          echo "Deploy source: ${DEPLOY_SOURCE}"
           echo "Waiting for ACR auto-build to publish: ${image}"
           echo "Attempts: ${attempts}, interval: ${interval}s"
+
+          if [ "$DEPLOY_SOURCE" = "main_branch" ] && [ "$IMAGE_TAG" = "latest" ]; then
+            echo "::warning::Waiting for :latest cannot detect a new build vs an old image. Prefer unique release tags or set ACR_MAIN_IMAGE_TAG to a fixed tag other than latest."
+          fi
 
           for attempt in $(seq 1 "$attempts"); do
             if docker manifest inspect "$image" >/dev/null 2>&1; then
@@ -68,13 +133,17 @@ jobs:
           done
 
           echo "Timed out waiting for ${image}"
-          echo "Check ACR build logs and that the build rule tag matches IMAGE_TAG (${IMAGE_TAG})."
+          echo "Check ACR build logs; tag must match ACR rule (release-v* -> \$version, main -> ACR_MAIN_IMAGE_TAG / latest)."
           exit 1
 
   deploy:
     name: Deploy to ECS
-    needs: wait-for-acr-image
+    needs:
+      - resolve-image-tag
+      - wait-for-acr-image
     runs-on: ubuntu-latest
+    env:
+      IMAGE_TAG: ${{ needs.resolve-image-tag.outputs.image_tag }}
 
     steps:
       - name: Check out repository
