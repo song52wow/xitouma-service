@@ -19,9 +19,9 @@ curl http://127.0.0.1:3001/health
 ## GitHub Actions Deploy
 
 The workflow is in `.github/workflows/deploy-ecs.yml`. **Docker images are built
-by Aliyun ACR** (auto-build on git push). GitHub Actions waits for the image tag,
-then SSHs to ECS to pull and start the container. See [acr-autobuild.md](./acr-autobuild.md)
-for ACR console setup.
+by Aliyun ACR** when you push a `release-v*` Git tag. Pushing `main` does not build
+or deploy. GitHub Actions waits for the version tag (e.g. `0.0.1`), then SSHs to ECS.
+See [acr-autobuild.md](./acr-autobuild.md) for ACR console setup.
 
 ### ACR Secrets (required to verify image before deploy)
 
@@ -32,7 +32,7 @@ for ACR console setup.
 
 Image: `crpi-df6i5zrps8a8t6ig.cn-shenzhen.personal.cr.aliyuncs.com/song52wow/xitouma-service`
 
-ACR rules in use: **Branch `main`** + **Tag `release-v*` → image tag `$version`**. See [acr-autobuild.md](./acr-autobuild.md). For main-only `latest`, set `ACR_MAIN_IMAGE_TAG=latest`.
+ACR rule: **Tag `release-v*` only** → image tag `$version` (e.g. `0.0.1`). See [acr-autobuild.md](./acr-autobuild.md).
 
 ### SSH Secrets (required)
 
@@ -79,8 +79,6 @@ secret matches before upload runs.
 | `ECS_COMPOSE_PROJECT` | Optional. Defaults to `xitouma-backend` |
 | `ECS_APP_PORT` | Optional. Host port for health check. Defaults to `3001` |
 | `POSTGRES_HOST` | Optional. Defaults to `postgres` (Docker network alias) |
-| `ACR_MAIN_IMAGE_TAG` | Optional. `main` branch image tag. Defaults to `latest` |
-| `ACR_IMAGE_TAG` | Optional. Fallback for `main` when `ACR_MAIN_IMAGE_TAG` unset |
 | `ACR_RELEASE_TAG_MODE` | Optional. `version` (default) or `full` for `release-v*` tags |
 | `ACR_WAIT_ATTEMPTS` | Optional. Defaults to `40` |
 | `ACR_WAIT_INTERVAL_SEC` | Optional. Defaults to `30` |

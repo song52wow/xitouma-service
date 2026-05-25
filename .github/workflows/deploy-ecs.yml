@@ -1,21 +1,17 @@
 name: Deploy Backend to Aliyun ECS
 
-# Image build runs in Aliyun ACR (code push auto-build). This workflow resolves
-# IMAGE_TAG from the push (release tag or main branch), waits for ACR, then deploys.
-# See docs/acr-autobuild.md.
+# Image build runs in Aliyun ACR (release-v* tag push only). This workflow resolves
+# IMAGE_TAG from the Git tag, waits for ACR, then deploys. See docs/acr-autobuild.md.
 
 on:
   push:
-    branches:
-      - main
-      - master
     tags:
       - release-v*
   workflow_dispatch:
     inputs:
       image_tag:
-        description: Override ACR image tag to deploy
-        required: false
+        description: ACR image tag to deploy (e.g. 0.0.1). Required for manual runs.
+        required: true
         type: string
 
 concurrency:
@@ -44,13 +40,15 @@ jobs:
         id: resolve
         env:
           DISPATCH_TAG: ${{ inputs.image_tag }}
-          OVERRIDE_TAG: ${{ vars.ACR_IMAGE_TAG }}
-          MAIN_TAG: ${{ vars.ACR_MAIN_IMAGE_TAG }}
           RELEASE_TAG_MODE: ${{ vars.ACR_RELEASE_TAG_MODE }}
         run: |
           set -euo pipefail
 
-          if [ -n "${DISPATCH_TAG}" ]; then
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            if [ -z "${DISPATCH_TAG}" ]; then
+              echo "workflow_dispatch requires image_tag (e.g. 0.0.1)"
+              exit 1
+            fi
             tag="${DISPATCH_TAG}"
             source="workflow_dispatch"
           elif [[ "${GITHUB_REF}" == refs/tags/release-v* ]]; then
@@ -69,17 +67,9 @@ jobs:
                 ;;
             esac
             source="release_tag"
-          elif [[ "${GITHUB_REF}" == refs/heads/main || "${GITHUB_REF}" == refs/heads/master ]]; then
-            if [ -n "${MAIN_TAG}" ]; then
-              tag="${MAIN_TAG}"
-            elif [ -n "${OVERRIDE_TAG}" ]; then
-              tag="${OVERRIDE_TAG}"
-            else
-              tag="latest"
-            fi
-            source="main_branch"
           else
-            echo "Unsupported ref for deploy: ${GITHUB_REF}"
+            echo "Deploy only triggers on release-v* tag push (ACR tag-only builds)."
+            echo "Unsupported ref: ${GITHUB_REF}"
             exit 1
           fi
 
@@ -119,10 +109,6 @@ jobs:
           echo "Waiting for ACR auto-build to publish: ${image}"
           echo "Attempts: ${attempts}, interval: ${interval}s"
 
-          if [ "$DEPLOY_SOURCE" = "main_branch" ] && [ "$IMAGE_TAG" = "latest" ]; then
-            echo "::warning::Waiting for :latest cannot detect a new build vs an old image. Prefer unique release tags or set ACR_MAIN_IMAGE_TAG to a fixed tag other than latest."
-          fi
-
           for attempt in $(seq 1 "$attempts"); do
             if docker manifest inspect "$image" >/dev/null 2>&1; then
               echo "Image is ready (attempt ${attempt}/${attempts})"
@@ -133,7 +119,7 @@ jobs:
           done
 
           echo "Timed out waiting for ${image}"
-          echo "Check ACR build logs; tag must match ACR rule (release-v* -> \$version, main -> ACR_MAIN_IMAGE_TAG / latest)."
+          echo "Check ACR build logs; tag must match ACR rule (release-v* Git tag -> \$version, e.g. 0.0.1)."
           exit 1
 
   deploy:
